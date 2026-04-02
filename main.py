@@ -252,22 +252,32 @@ def find_rss(url: str) -> tuple[str, str]:
 
 # ── API Routes ────────────────────────────────────────────────────────
 
+class FeedRequest(BaseModel):
+    rss_urls: Optional[list] = None
+
 @app.get("/api/feed")
-def get_feed():
-    """Return interleaved articles from all active sources."""
-    with get_db() as conn:
-        sources = conn.execute("SELECT * FROM sources WHERE active=1").fetchall()
+@app.post("/api/feed")
+async def get_feed(req: FeedRequest = None):
+    """Return interleaved articles. Accepts optional rss_urls from frontend localStorage."""
+    if req and req.rss_urls:
+        # Frontend passed its own source list (from localStorage)
+        source_pairs = [(url, url.split('/')[2].split('.')[0].capitalize()) for url in req.rss_urls]
+    else:
+        # Fall back to DB sources
+        with get_db() as conn:
+            rows = conn.execute("SELECT * FROM sources WHERE active=1").fetchall()
+        source_pairs = [(r["rss_url"], r["name"]) for r in rows]
 
     from collections import defaultdict
     by_source = defaultdict(list)
     errors = []
 
-    for src in sources:
-        arts, err = fetch_rss_cached(src["rss_url"], src["name"])
+    for rss_url, name in source_pairs:
+        arts, err = fetch_rss_cached(rss_url, name)
         if err:
-            errors.append({"source": src["name"], "error": err})
+            errors.append({"source": name, "error": err})
         for a in arts:
-            by_source[src["name"]].append(a)
+            by_source[name].append(a)
 
     # Round-robin interleave
     interleaved = []
@@ -277,7 +287,6 @@ def get_feed():
                 interleaved.append(by_source[sname].pop(0))
 
     return {"articles": interleaved, "errors": errors, "count": len(interleaved)}
-
 
 @app.post("/api/summarize")
 def summarize(req: SummarizeRequest):
