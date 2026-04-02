@@ -11,8 +11,7 @@ Endpoints:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import sqlite3, feedparser, requests, os, re
@@ -349,14 +348,7 @@ def toggle_source(source_id: int, req: ToggleSourceRequest):
     return {"ok": True}
 
 
-# ── Serve frontend ────────────────────────────────────────────────────
+# ── Health check ─────────────────────────────────────────────────────
 @app.get("/")
-def serve_index():
-    return FileResponse("frontend/index.html")
-
-@app.get("/{path:path}")
-def serve_static(path: str):
-    fp = f"frontend/{path}"
-    if os.path.exists(fp):
-        return FileResponse(fp)
-    return FileResponse("frontend/index.html")
+def root():
+    return {"status": "ok", "app": "TL;DRSS API", "version": "1.0"}
