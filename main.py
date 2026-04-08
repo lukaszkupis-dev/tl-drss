@@ -252,28 +252,38 @@ def find_rss(url: str) -> tuple[str, str]:
 
 # ── API Routes ────────────────────────────────────────────────────────
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=8)
+
 class FeedRequest(BaseModel):
     rss_urls: Optional[list] = None
 
 @app.get("/api/feed")
 @app.post("/api/feed")
 async def get_feed(req: FeedRequest = None):
-    """Return interleaved articles. Accepts optional rss_urls from frontend localStorage."""
+    """Return interleaved articles. Fetches all RSS sources in parallel."""
     if req and req.rss_urls:
-        # Frontend passed its own source list (from localStorage)
         source_pairs = [(url, url.split('/')[2].split('.')[0].capitalize()) for url in req.rss_urls]
     else:
-        # Fall back to DB sources
         with get_db() as conn:
             rows = conn.execute("SELECT * FROM sources WHERE active=1").fetchall()
         source_pairs = [(r["rss_url"], r["name"]) for r in rows]
+
+    # Fetch all RSS feeds in parallel
+    loop = asyncio.get_event_loop()
+    tasks = [
+        loop.run_in_executor(_executor, fetch_rss_cached, rss_url, name)
+        for rss_url, name in source_pairs
+    ]
+    results = await asyncio.gather(*tasks)
 
     from collections import defaultdict
     by_source = defaultdict(list)
     errors = []
 
-    for rss_url, name in source_pairs:
-        arts, err = fetch_rss_cached(rss_url, name)
+    for (rss_url, name), (arts, err) in zip(source_pairs, results):
         if err:
             errors.append({"source": name, "error": err})
         for a in arts:
